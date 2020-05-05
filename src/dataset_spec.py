@@ -11,15 +11,17 @@ from torch.utils.data.dataset import Dataset
 
 
 class PriusData(Dataset):
-    def __init__(self, root_dir, transform=None, mode="static"):
+
+    def __init__(self, root_dir, transform=None, mode="static", class_type="coarse_class"):
 
         self.data_dir = root_dir
         self.mode     = mode
 
         # make it easier to read the csv file
-        header_names = ["bag_name", "fine_class", "filename", "coarse_class", "location", "frame_num", "ego_motion"]
-        use_columns  = [0,1,2,3,5,6,8]
-        avail_modes  = ["static", "driving", "all"]
+        header_names  = ["bag_name", "fine_class", "filename", "coarse_class", "location", "frame_num", "ego_motion"]
+        avail_class_t = ["coarse_class", "fine_class"]
+        use_columns   = [0,1,2,3,5,6,8]
+        avail_modes   = ["static", "driving", "all"]
 
         if len(header_names)!=len(use_columns):
             raise ValueError("Number of columns({}) do not match the headers wanted({})".format(len(header_names), len(use_columns)))
@@ -37,8 +39,15 @@ class PriusData(Dataset):
         else:
             raise ValueError("Selected mode ({}) not available. Available modes: {}".format(self.mode, avail_modes))
 
-        self.classes = ["positive", "negative"]
         self.transform = transform
+        self.locations = list(set(self.rel_data["location"]))
+
+        if class_type in avail_class_t:
+            self.targets = self.rel_data[class_type]
+            self.classes = list(set(self.targets))
+
+        else:
+            raise ValueError("Selected class type ({}) not available. Choose from: {}".format(class_type, avail_class_t))
 
     def __len__(self):
 
