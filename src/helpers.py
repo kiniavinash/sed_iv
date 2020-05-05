@@ -65,3 +65,13 @@ def plot_spec(sample_tensor, sample_rate):
     librosa.display.specshow(s_db, x_axis='time', y_axis='mel', sr=sample_rate, fmax=20000)
     plt.colorbar(format='%+2.0f dB')
     plt.show()
+
+
+def apply_layers(layer_input, layer):
+    """
+    Assist in forward pass of layers
+    :param layer_input: Input to the layer
+    :param layer: Layer as defined by the model
+    :return: Output of the Layer
+    """
+    return layer(layer_input)
