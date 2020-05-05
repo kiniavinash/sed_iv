@@ -5,18 +5,13 @@ import matplotlib.pyplot as plt
 import librosa.display
 
 from dataset_spec import PriusData
+from helpers import plot_spec, stratified_split
+# from models.baseline import my_model
+
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from torch import Tensor
 
-
-# plot spectrogram of each sample
-def plot_spec(sample_tensor):
-    plt.figure(figsize=(10, 4))
-    s_db = librosa.power_to_db(sample_tensor.numpy()[0, :, :], ref=np.max)
-    librosa.display.specshow(s_db, x_axis='time', y_axis='mel', sr=sample_rate, fmax=20000)
-    plt.colorbar(format='%+2.0f dB')
-    plt.show()
 
 
 if __name__ == '__main__':
@@ -35,18 +30,22 @@ if __name__ == '__main__':
         lambda x: Tensor(x)
     ])
 
+    my_dataset = PriusData(data_dir, transform=my_transforms, mode="static")
+
     # set up dataloader
-    static_dataset = DataLoader(
-        PriusData(data_dir, transform=my_transforms, mode="static"),
-        batch_size=1,
-        shuffle=True,
-        num_workers=0)
+    # static_dataset = DataLoader(
+    #     my_dataset,
+    #     batch_size=1,
+    #     shuffle=True,
+    #     num_workers=1)
+
+    train_data, val_data, test_data = stratified_split(my_dataset, mode="three_split")
 
     # go through the samples
-    for idx, (sample, label) in enumerate(static_dataset):
+    for idx, (sample, label) in enumerate(train_data):
 
         # debug only
         # print("{}: DataShape: {}, Label: {}".format(idx, sample.shape, label))
-        # plot_spec(sample)
+        # plot_spec(sample, sample_rate)
 
         break
