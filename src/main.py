@@ -11,6 +11,12 @@ from models.baseline_crnn import CRNN
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from torch import Tensor
+from torch.nn import BCEWithLogitsLoss
+from torch.utils.tensorboard import SummaryWriter
+
+from tqdm import tqdm
+
+writer = SummaryWriter()
 
 if __name__ == '__main__':
 
@@ -19,6 +25,8 @@ if __name__ == '__main__':
     mel_banks = 128
     mic_used = 5  # mic number used
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    epochs = 100
+    batch_size = 4
 
     # transforms as required
     my_transforms = transforms.Compose([
@@ -29,24 +37,50 @@ if __name__ == '__main__':
         lambda x: Tensor(x)
     ])
 
+    # initialize the dataset
     my_dataset = PriusData(data_dir, transform=my_transforms, mode="static")
 
-    train_data, val_data, test_data = stratified_split(my_dataset, mode="three_split")
+    # split the dataset
+    train_data, val_data, test_data = stratified_split(my_dataset, mode="three_split", batch_size=batch_size)
 
+    # setup the model, optimiser and the loss function
     my_model = CRNN().to(DEVICE)
+    my_optim = torch.optim.Adam(my_model.parameters(), lr=0.001)
+    my_loss  = BCEWithLogitsLoss()
 
-    # go through the samples
-    for idx, (sample, label) in enumerate(train_data):
-        # debug only
-        print("{}: DataShape: {}, Label: {}".format(idx, sample.shape, label))
+    for epoch in tqdm(range(epochs)):
 
-        if DEVICE == torch.device("cuda"):
-            sample = sample.cuda()
+        # training the model
+        my_model = my_model.train()
 
-        output = my_model(sample)
-        print("{}: OutputShape: {}". format(idx, output.shape))
+        training_loss = 0.0
+        for idx, (sample, label) in enumerate(train_data):
+            # debug only
+            # print("{}: DataShape: {}, LabelShape: {}, {}".format(idx, sample.shape, label))
 
-        break
+            # setting all gradients to zero, apparently useful,
+            # see: https://stackoverflow.com/questions/48001598/why-do-we-need-to-call-zero-grad-in-pytorch
+            my_optim.zero_grad()
+
+            if DEVICE == torch.device("cuda"):
+                sample = sample.cuda()
+                label  = label.cuda()
+
+            label_hat = my_model(sample)
+
+            # compute loss and backpropagate
+            loss = my_loss(label_hat, label)
+            loss.backward()
+            my_optim.step()
+
+            # TODO: not sure if I have to clip the gradients here.
+
+            training_loss += loss.item() * batch_size
+
+            writer.add_scalar('Training Loss', training_loss, epoch*len(train_data)+idx)
+
+            training_loss = 0.0
+
 
 
 
