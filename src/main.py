@@ -1,25 +1,24 @@
 import librosa
 import numpy as np
-
+import torch
 import matplotlib.pyplot as plt
 import librosa.display
 
-from dataset_spec import PriusData
-from helpers import plot_spec, stratified_split
-# from models.baseline import my_model
+from tools.dataset_spec import PriusData
+from tools.helpers import plot_spec, stratified_split
+from models.baseline_crnn import CRNN
 
 from torch.utils.data import DataLoader
 from torchvision import transforms
 from torch import Tensor
-
-
 
 if __name__ == '__main__':
 
     data_dir = "../../data"
     sample_rate = 47998
     mel_banks = 128
-    mic_used = 5          #mic number used
+    mic_used = 5  # mic number used
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # transforms as required
     my_transforms = transforms.Compose([
@@ -32,20 +31,29 @@ if __name__ == '__main__':
 
     my_dataset = PriusData(data_dir, transform=my_transforms, mode="static")
 
-    # set up dataloader
-    # static_dataset = DataLoader(
-    #     my_dataset,
-    #     batch_size=1,
-    #     shuffle=True,
-    #     num_workers=1)
-
     train_data, val_data, test_data = stratified_split(my_dataset, mode="three_split")
+
+    my_model = CRNN().to(DEVICE)
 
     # go through the samples
     for idx, (sample, label) in enumerate(train_data):
-
         # debug only
-        # print("{}: DataShape: {}, Label: {}".format(idx, sample.shape, label))
-        # plot_spec(sample, sample_rate)
+        print("{}: DataShape: {}, Label: {}".format(idx, sample.shape, label))
+
+        if DEVICE == torch.device("cuda"):
+            sample = sample.cuda()
+
+        output = my_model(sample)
+        print("{}: OutputShape: {}". format(idx, output.shape))
 
         break
+
+
+
+
+# set up dataloader for the entire dataset
+# static_dataset = DataLoader(
+#     my_dataset,
+#     batch_size=1,
+#     shuffle=True,
+#     num_workers=1)
