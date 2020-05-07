@@ -5,18 +5,19 @@ import matplotlib.pyplot as plt
 import librosa.display
 
 from tools.dataset_spec import PriusData
-from tools.helpers import plot_spec, stratified_split
+from tools.helpers import stratified_split, run_one_epoch
+
 from models.baseline_crnn import CRNN
 
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from torch import Tensor
+from torch import Tensor, no_grad
 from torch.nn import BCEWithLogitsLoss
-from torch.utils.tensorboard import SummaryWriter
+# from torch.utils.tensorboard import SummaryWriter
 
 from tqdm import tqdm
 
-writer = SummaryWriter()
+# writer = SummaryWriter()
 
 if __name__ == '__main__':
 
@@ -26,7 +27,7 @@ if __name__ == '__main__':
     mic_used = 5  # mic number used
     DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     epochs = 100
-    batch_size = 4
+    batch_size = 16
 
     # transforms as required
     my_transforms = transforms.Compose([
@@ -44,45 +45,36 @@ if __name__ == '__main__':
     train_data, val_data, test_data = stratified_split(my_dataset, mode="three_split", batch_size=batch_size)
 
     # setup the model, optimiser and the loss function
-    my_model = CRNN().to(DEVICE)
+    my_model = CRNN(cnn_dropout=0.25).to(DEVICE)
     my_optim = torch.optim.Adam(my_model.parameters(), lr=0.001)
     my_loss  = BCEWithLogitsLoss()
 
-    for epoch in tqdm(range(epochs)):
+    # training the model
+    for epoch in tqdm(range(epochs), desc="Training the model"):
 
         # training the model
         my_model = my_model.train()
 
-        training_loss = 0.0
-        for idx, (sample, label) in enumerate(train_data):
-            # debug only
-            # print("{}: DataShape: {}, LabelShape: {}, {}".format(idx, sample.shape, label))
+        my_model = run_one_epoch(model=my_model,
+                                 data=train_data,
+                                 loss_function=my_loss,
+                                 optimizer=my_optim,
+                                 device=DEVICE,
+                                 epoch_num=epoch,
+                                 mode="train",
+                                 batch_size=batch_size)
 
-            # setting all gradients to zero, apparently useful,
-            # see: https://stackoverflow.com/questions/48001598/why-do-we-need-to-call-zero-grad-in-pytorch
-            my_optim.zero_grad()
-
-            if DEVICE == torch.device("cuda"):
-                sample = sample.cuda()
-                label  = label.cuda()
-
-            label_hat = my_model(sample)
-
-            # compute loss and backpropagate
-            loss = my_loss(label_hat, label)
-            loss.backward()
-            my_optim.step()
-
-            # TODO: not sure if I have to clip the gradients here.
-
-            training_loss += loss.item() * batch_size
-
-            writer.add_scalar('Training Loss', training_loss, epoch*len(train_data)+idx)
-
-            training_loss = 0.0
-
-
-
+        # check model against validation data
+        my_model = my_model.eval()
+        with no_grad():
+            my_model = run_one_epoch(model=my_model,
+                                     data=val_data,
+                                     loss_function=my_loss,
+                                     optimizer=None,
+                                     device=DEVICE,
+                                     epoch_num=epoch,
+                                     mode="validation",
+                                     batch_size=batch_size)
 
 
 # set up dataloader for the entire dataset
