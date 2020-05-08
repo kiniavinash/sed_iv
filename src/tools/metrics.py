@@ -1,14 +1,121 @@
 # code source: https://github.com/dr-costas/dnd-sed/tree/master/tools/metrics.py
 
 import torch
+import pandas as pd
+import numpy as np
+
+from .settings import REF_LABELS
+from sklearn.metrics import confusion_matrix, accuracy_score, jaccard_score
 
 _eps: float = torch.finfo(torch.float32).eps
+
+
+def get_weak_labels(y_hat):
+    """
+    Aggregates strong labels to weak labels per frame
+
+    :param y_hat: strong labels
+    :return: y_hat_weak: weak labels
+    """
+    # compute idx of max probability for each time step
+    _, max_idxs = y_hat.max(dim=1)
+
+    # generate mask
+    y_preds = torch.zeros(y_hat.shape)
+    y_preds = y_preds.scatter_(1, max_idxs.unsqueeze(1), 1.)
+
+    # majority voting
+    sum_votes = y_preds.sum(dim=2)
+
+    ref_labels = REF_LABELS
+
+    # generate weak labels
+    _, preds = sum_votes.max(dim=1)
+    y_hat_weak = [ref_labels[idx] for idx in preds]
+
+    return y_hat_weak
+
+
+def get_per_class_acc(C):
+    pc_accuracies = []
+
+    for i in range(len(C)):
+        TP = C[i, i]
+        col_sum = np.sum(C[:, i])
+        row_sum = np.sum(C[i, :])
+        FP = col_sum - TP
+        FN = row_sum - TP
+        TN = np.sum(C) - TP - FP - FN
+
+        if (TP + TN + FP + FN) == 0:
+            pc_accuracies.append(1.0)
+        else:
+            pc_accuracies.append((TP + TN) / (TP + TN + FP + FN))
+
+    return pc_accuracies
+
+
+def get_per_class_iou(C):
+    pc_accuracies = []
+
+    for i in range(len(C)):
+        TP = C[i, i]
+        col_sum = np.sum(C[:, i])
+        row_sum = np.sum(C[i, :])
+        FP = col_sum - TP
+        FN = row_sum - TP
+        TN = np.sum(C) - TP - FP - FN
+
+        if (TP + FP + FN) == 0:
+            pc_accuracies.append(1.0)
+        else:
+            pc_accuracies.append(TP / (TP + FP + FN))
+
+    return pc_accuracies
+
+
+def weak_label_metrics(y_hat, y_true):
+    y_hat_weak = get_weak_labels(y_hat)
+    y_true_weak = get_weak_labels(y_true)
+
+    # compute confusion matrix
+    conf_mat_uf = confusion_matrix(y_true_weak, y_hat_weak, labels=REF_LABELS)
+
+    # format matrix using pandas for better readability when printing
+    conf_mat = pd.DataFrame(conf_mat_uf,
+                            index=['True:' + lbl for lbl in REF_LABELS],
+                            columns=['Pred:' + lbl for lbl in REF_LABELS])
+    print("Confusion Matrix : ")
+    print(conf_mat)
+    print("=======")
+
+    # compute overall accuracy
+    accuracy = accuracy_score(y_true_weak, y_hat_weak)
+    print("Overall Accuracy: {}".format(accuracy))
+    print("=======")
+
+    # compute per class accuracy
+    per_class_acc_uf = get_per_class_acc(conf_mat_uf)
+    per_class_acc = pd.DataFrame(per_class_acc_uf,
+                                 columns=["Per Class Accuracy"],
+                                 index=REF_LABELS)
+    print("{}".format(per_class_acc))
+    print("========")
+
+    # compute Jaccard Index per class
+    per_class_iou_uf = get_per_class_iou(conf_mat_uf)
+    per_class_iou = pd.DataFrame(per_class_iou_uf,
+                                 columns=["Per Class IoU"],
+                                 index=REF_LABELS)
+    print("{}".format(per_class_iou))
+    print("========")
 
 
 def f1_per_frame(y_hat, y_true):
     """Gets the average per frame F1 score, based on\
     TP, FP, and FN, calculated from the `y_hat`\
     predictions and `y_true` ground truth values.
+
     :param y_hat: Predictions
     :type y_hat: torch.Tensor
     :param y_true: Ground truth values
@@ -47,7 +154,7 @@ def error_rate_per_frame(y_hat, y_true):
     i = fp.sub(fn).clamp_min(0).sum()
     n = y_true.sum() + _eps
 
-    return (s + d + i)/n
+    return (s + d + i) / n
 
 
 def _f1(tp, fp, fn):

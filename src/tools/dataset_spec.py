@@ -13,7 +13,6 @@ from torch.utils.data.dataset import Dataset
 class PriusData(Dataset):
 
     def __init__(self, root_dir, transform=None, mode="static", class_type="coarse_class", label_type="strong_label"):
-
         self.data_dir = root_dir
         self.mode = mode
         self.class_type = class_type
@@ -38,10 +37,8 @@ class PriusData(Dataset):
         if self.mode == "static" or self.mode == "driving":
             is_mode = self.csv_file["ego_motion"] == self.mode
             self.rel_data = self.csv_file[is_mode]
-
         elif self.mode == "all":
             self.rel_data = self.csv_file
-
         else:
             raise ValueError(
                 "Selected mode ({}) not available. Available modes: {}".format(self.mode, self.avail_modes))
@@ -52,17 +49,14 @@ class PriusData(Dataset):
         if class_type in self.avail_class_t:
             self.targets = self.rel_data[class_type]
             self.classes = list(set(self.targets))
-
         else:
             raise ValueError("Selected class type ({}) not available. Choose from: {}"
                              .format(class_type, self.avail_class_t))
 
     def __len__(self):
-
         return self.rel_data.shape[0]
 
     def __getitem__(self, idx):
-
         filename = self.rel_data["filename"][idx]
         sample_type = self.rel_data["fine_class"][idx]
 
@@ -75,20 +69,22 @@ class PriusData(Dataset):
         else:
             data = data
 
-        label = self.rel_data["coarse_class"][idx]
+        label = self.rel_data[self.class_type][idx]
+        weak_label = label
 
         if self.label_type == "strong_label":
-            label = self.get_strong_labels(label, data.shape[1])
-
+            label = self.get_strong_labels(weak_label, data.shape[1])
         elif self.label_type not in self.avail_label_t:
             raise ValueError("Selected label type ({}) not available. Choose from: {}"
                              .format(self.label_type, self.avail_label_t))
 
-        return data, label
+        return data, label, weak_label
 
     def get_strong_labels(self, label, t_size):
         """
         convert weak labels to strong.
+
+        :param t_size: temporal length of each spectrogram
         :param label: weak labels in the form of str
         :return: strong labels
         """
@@ -96,25 +92,19 @@ class PriusData(Dataset):
 
         if self.class_type == "coarse_class":
             strong_label = torch.zeros([2, t_size], dtype=torch.float64)
-
             if label == "positive":
                 strong_label[0, :] = strong_label[0, :] + label_tensor
-
             else:
                 strong_label[1, :] = strong_label[1, :] + label_tensor
 
         elif self.class_type == "fine_class":
             strong_label = torch.zeros([4, t_size], dtype=torch.float64)
-
             if label == "front":
                 strong_label[0, :] = strong_label[0, :] + label_tensor
-
             elif label == "left":
                 strong_label[1, :] = strong_label[1, :] + label_tensor
-
             elif label == "negative":
                 strong_label[2, :] = strong_label[2, :] + label_tensor
-
             elif label == "right":
                 strong_label[3, :] = strong_label[3, :] + label_tensor
 
