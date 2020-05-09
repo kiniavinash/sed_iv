@@ -14,7 +14,8 @@ from torch.nn import BCEWithLogitsLoss
 from torch.utils.tensorboard import SummaryWriter
 
 from .metrics import f1_per_frame, weak_label_metrics
-from .settings import MODEL_PATH, MODEL_NAME, test_model_name, ENABLE_CLASS_COUNTING
+from .settings import MODEL_PATH, MODEL_NAME, test_model_name, ENABLE_CLASS_COUNTING, DATA_DIR, CLASS_TYPE
+from .dataset_spec import PriusData
 
 from tqdm import tqdm
 
@@ -34,8 +35,6 @@ def get_samples_per_class(data_idx, dataset, enable_counting=False):
         data_sampler = SubsetRandomSampler(data_idx)
         _dataloader = DataLoader(dataset, batch_size=1, sampler=data_sampler)
 
-
-
         class_dist = {k: 0 for k in dataset.classes}
         for idx, (_, _, weak_label) in enumerate(_dataloader):
             class_dist[weak_label[0]] += 1
@@ -45,15 +44,51 @@ def get_samples_per_class(data_idx, dataset, enable_counting=False):
         return "Samples per class not counted"
 
 
+def category_split(train_cat=None,
+                   test_cat=None,
+                   val_split=0.2,
+                   batch_size=1,
+                   num_workers=1,
+                   seed=None,
+                   transform=None,
+                   verbose=True):
+
+    train_dataset = PriusData(DATA_DIR, transform=transform, mode=train_cat, class_type=CLASS_TYPE)
+
+    train_loader, val_loader = stratified_split(train_dataset, test_split=val_split, mode="two_split",
+                                                batch_size=batch_size, seed=seed, verbose=False)
+
+    test_dataset = PriusData(DATA_DIR, transform=transform, mode=test_cat, class_type=CLASS_TYPE)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers)
+
+    if verbose:
+        print("""
+        Dataset details....
+        -----------------
+        Total samples: {}, {}
+        Training: {}, {}
+        Validation: {}, {}
+        Testing: {}, {}
+        ---------------""".format(len(train_dataset)+len(test_dataset), None,
+                                  len(train_dataset) - len(val_loader)*batch_size, "Estimated",
+                                  len(val_loader)*batch_size, "Estimated",
+                                  len(test_dataset), None))
+
+    return train_loader, val_loader, test_loader
+
+
 def stratified_split(dataset,
                      mode="three_split",
                      test_split=0.2,
                      val_split=0.2,
                      batch_size=1,
                      num_workers=1,
-                     seed=None):
+                     seed=None,
+                     verbose=True):
     """
     Get stratified split of the given dataset
+
+    :param verbose: Print dataset details or not
     :param dataset: dataset object
     :param mode: defines train/test or train/val/test split
     :param test_split: test split size relative to entire dataset
@@ -86,7 +121,8 @@ def stratified_split(dataset,
         val_dist = get_samples_per_class(val_idx, dataset, ENABLE_CLASS_COUNTING)
         test_dist = get_samples_per_class(test_idx, dataset, ENABLE_CLASS_COUNTING)
 
-        print("""
+        if verbose:
+            print("""
             Dataset details....
             -----------------
             Total samples: {}, {}
@@ -113,7 +149,8 @@ def stratified_split(dataset,
         train_dist = get_samples_per_class(train_idx, dataset, ENABLE_CLASS_COUNTING)
         test_dist = get_samples_per_class(test_idx, dataset, ENABLE_CLASS_COUNTING)
 
-        print("""
+        if verbose:
+            print("""
             Dataset details....
             -----------------
             Total samples: {}, {}
@@ -194,7 +231,7 @@ def run_one_epoch(model=None,
 
     running_loss = 0.0
     batch_size = data.batch_size
-    best_val_loss = 1e8
+    all_losses = torch.zeros(len(data))
 
     y_hat, y_true = [], []
 
@@ -223,12 +260,7 @@ def run_one_epoch(model=None,
         y_true.append(label.cpu())
         y_hat.append(label_hat.cpu())
 
-        if mode == "train":
-            writer.add_scalar('{} Loss'.format(mode), running_loss, epoch_num * len(data) + idx)
-        elif mode == "validation":
-            writer.add_scalar('{} Loss'.format(mode), running_loss, epoch_num * len(data) + idx)
-            if best_val_loss > running_loss:
-                best_val_loss = running_loss
+        all_losses[idx] = running_loss
 
         running_loss = 0.0
 
@@ -240,10 +272,12 @@ def run_one_epoch(model=None,
 
     if mode == "train":
         writer.add_scalar('F1-Score - {}'.format(mode), f1_score, epoch_num)
+        writer.add_scalar('{} Loss'.format(mode), all_losses.mean().item(), epoch_num)
         return model
     elif mode == "validation":
         writer.add_scalar('F1-Score - {}'.format(mode), f1_score, epoch_num)
-        return model, best_val_loss
+        writer.add_scalar('{} Loss'.format(mode), all_losses.mean().item(), epoch_num)
+        return model, all_losses
     elif mode == "test":
         weak_label_metrics(y_hat, y_true)
         return model, f1_score
@@ -299,8 +333,11 @@ def train_model(model=None,
                                                       epoch_num=epoch,
                                                       mode="validation")
 
+            val_loss_epoch = val_loss_epoch.mean().item()
+            # print("Epoch: {}, Val_loss_epoch: {}, Best_val_loss: {}, Best_epoch: {}"
+            #       .format(epoch, val_loss_epoch, best_val_loss, best_epoch))
             if val_loss_epoch < best_val_loss:
-                val_loss_epoch = best_val_loss
+                best_val_loss = val_loss_epoch
                 best_epoch = epoch
                 best_model = deepcopy(model.state_dict())
 

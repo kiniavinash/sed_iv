@@ -17,14 +17,29 @@ class PriusData(Dataset):
         self.mode = mode
         self.class_type = class_type
         self.label_type = label_type
+        self.transform = transform
 
         # make it easier to read the csv file
         self.header_names = ["bag_name", "fine_class", "filename", "coarse_class", "location", "frame_num",
                              "ego_motion"]
         self.avail_class_t = ["coarse_class", "fine_class"]
         self.use_columns = [0, 1, 2, 3, 5, 6, 8]
-        self.avail_modes = ["static", "driving", "all"]
+        self.avail_mixed_modes = ["static", "driving", "all"]
         self.avail_label_t = ["strong_label", "weak_label"]
+        self.avail_category_modes = ["SA", "SB", "SA1", "SA2", "SB1", "SB2", "SB3",
+                                     "SB12", "SB23", "SB31", "DA", "DB"]
+        self.location_labels = {"SA1": ["AnnaBoogerd"], "SA2": ["Kwekerij"], "SB1": ["Willem", "TanthofBackup"],
+                                "SB2": ["Vermeerstraat"] , "SB3": ["Geerboogerd"],
+                                "SB12": ["Willem", "TanthofBackup", "Vermeerstraat"],
+                                "SB23": ["Vermeerstraat", "Geerboogerd"],
+                                "SB31": ["Geerboogerd", "Willem", "TanthofBackup"],
+                                "DA": ["KwekerijD"],
+                                "DB": ["VermeerstraatD"]}
+
+        if self.mode not in (self.avail_mixed_modes + self.avail_category_modes):
+            raise ValueError(
+                "Selected mode ({}) not available. Available modes: {}"
+                .format(self.mode, self.avail_mixed_modes + self.avail_category_modes))
 
         if len(self.header_names) != len(self.use_columns):
             raise ValueError("Number of columns({}) do not match the headers wanted({})".format(len(self.header_names),
@@ -39,11 +54,16 @@ class PriusData(Dataset):
             self.rel_data = self.csv_file[is_mode]
         elif self.mode == "all":
             self.rel_data = self.csv_file
-        else:
-            raise ValueError(
-                "Selected mode ({}) not available. Available modes: {}".format(self.mode, self.avail_modes))
+        elif self.mode in self.location_labels:
+            self.rel_data = self.csv_file[self.csv_file["location"].isin(self.location_labels[self.mode])]
+        elif self.mode in "SA":
+            self.rel_data = self.csv_file[self.csv_file["location"].isin(self.location_labels["SA1"] +
+                                                                         self.location_labels["SA2"])]
+        elif self.mode in "SB":
+            self.rel_data = self.csv_file[self.csv_file["location"].isin(self.location_labels["SB1"] +
+                                                                         self.location_labels["SB2"] +
+                                                                         self.location_labels["SB3"])]
 
-        self.transform = transform
         self.locations = list(set(self.rel_data["location"]))
 
         if class_type in self.avail_class_t:
@@ -57,8 +77,8 @@ class PriusData(Dataset):
         return self.rel_data.shape[0]
 
     def __getitem__(self, idx):
-        filename = self.rel_data["filename"][idx]
-        sample_type = self.rel_data["fine_class"][idx]
+        filename = self.rel_data["filename"].iloc[idx]
+        sample_type = self.rel_data["fine_class"].iloc[idx]
 
         file_location = os.path.join(*[self.data_dir, sample_type, filename])
 
@@ -69,7 +89,7 @@ class PriusData(Dataset):
         else:
             data = data
 
-        label = self.rel_data[self.class_type][idx]
+        label = self.rel_data[self.class_type].iloc[idx]
         weak_label = label
 
         if self.label_type == "strong_label":
@@ -89,6 +109,7 @@ class PriusData(Dataset):
         :return: strong labels
         """
         label_tensor = torch.ones([1, t_size], dtype=torch.float64)
+        strong_label = None
 
         if self.class_type == "coarse_class":
             strong_label = torch.zeros([2, t_size], dtype=torch.float64)
