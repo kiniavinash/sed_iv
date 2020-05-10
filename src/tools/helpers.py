@@ -5,21 +5,17 @@ import torch
 import warnings
 import os
 
-
 from sklearn.model_selection import train_test_split
 from copy import deepcopy
 
 from torch.utils.data import SubsetRandomSampler, DataLoader
-from torch.nn import BCEWithLogitsLoss
-from torch.utils.tensorboard import SummaryWriter
 
 from .metrics import f1_per_frame, weak_label_metrics
-from .settings import MODEL_PATH, MODEL_NAME, test_model_name, ENABLE_CLASS_COUNTING, DATA_DIR, CLASS_TYPE
+from .settings import MODEL_PATH, MODEL_NAME, test_model_name, ENABLE_CLASS_COUNTING, DATA_DIR, CLASS_TYPE,\
+    BATCH_SIZE, RANDOM_SEED
 from .dataset_spec import PriusData
 
 from tqdm import tqdm
-
-writer = SummaryWriter()
 
 
 def get_samples_per_class(data_idx, dataset, enable_counting=False):
@@ -52,29 +48,34 @@ def category_split(train_cat=None,
                    seed=None,
                    transform=None,
                    verbose=True):
-
     train_dataset = PriusData(DATA_DIR, transform=transform, mode=train_cat, class_type=CLASS_TYPE)
 
-    train_loader, val_loader = stratified_split(train_dataset, test_split=val_split, mode="two_split",
-                                                batch_size=batch_size, seed=seed, verbose=False)
+    if test_cat is None:
+        train_loader, val_loader, test_loader = stratified_split(train_dataset, mode="three_split",
+                                                                 batch_size=BATCH_SIZE, seed=RANDOM_SEED,
+                                                                 verbose=verbose)
+        return train_loader, val_loader, test_loader
+    else:
+        train_loader, val_loader = stratified_split(train_dataset, test_split=val_split, mode="two_split",
+                                                    batch_size=batch_size, seed=seed, verbose=False)
 
-    test_dataset = PriusData(DATA_DIR, transform=transform, mode=test_cat, class_type=CLASS_TYPE)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers)
+        test_dataset = PriusData(DATA_DIR, transform=transform, mode=test_cat, class_type=CLASS_TYPE)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers)
 
-    if verbose:
-        print("""
-        Dataset details....
-        -----------------
-        Total samples: {}, {}
-        Training: {}, {}
-        Validation: {}, {}
-        Testing: {}, {}
-        ---------------""".format(len(train_dataset)+len(test_dataset), None,
-                                  len(train_dataset) - len(val_loader)*batch_size, "Estimated",
-                                  len(val_loader)*batch_size, "Estimated",
-                                  len(test_dataset), None))
+        if verbose:
+            print("""
+            Dataset details....
+            -----------------
+            Total samples: {}, {}
+            Training: {}, {}
+            Validation: {}, {}
+            Testing: {}, {}
+            ---------------""".format(len(train_dataset) + len(test_dataset), None,
+                                      len(train_dataset) - len(val_loader) * batch_size, "Estimated",
+                                      len(val_loader) * batch_size, "Estimated",
+                                      len(test_dataset), None))
 
-    return train_loader, val_loader, test_loader
+        return train_loader, val_loader, test_loader
 
 
 def stratified_split(dataset,
@@ -194,10 +195,12 @@ def run_one_epoch(model=None,
                   optimizer=None,
                   device=torch.device("cpu"),
                   epoch_num=1,
-                  mode="train"):
+                  mode="train",
+                  writer=None):
     """
     Runs one epoch for either training, validation or testing.
 
+    :param writer:
     :param model: Unoptimized/Optimized model
     :param data: Data to be trained/validated/tested
     :param loss_function: loss/objective function to be used for optimising the model
@@ -271,12 +274,14 @@ def run_one_epoch(model=None,
     f1_score = f1_per_frame(y_hat.sigmoid(), y_true).mean().item()
 
     if mode == "train":
-        writer.add_scalar('F1-Score - {}'.format(mode), f1_score, epoch_num)
-        writer.add_scalar('{} Loss'.format(mode), all_losses.mean().item(), epoch_num)
+        if writer is not None:
+            writer.add_scalar('F1-Score/{}'.format(mode), f1_score, epoch_num)
+            writer.add_scalar('Loss/{}'.format(mode), all_losses.mean().item(), epoch_num)
         return model
     elif mode == "validation":
-        writer.add_scalar('F1-Score - {}'.format(mode), f1_score, epoch_num)
-        writer.add_scalar('{} Loss'.format(mode), all_losses.mean().item(), epoch_num)
+        if writer is not None:
+            writer.add_scalar('F1-Score/{}'.format(mode), f1_score, epoch_num)
+            writer.add_scalar('Loss/{}'.format(mode), all_losses.mean().item(), epoch_num)
         return model, all_losses
     elif mode == "test":
         weak_label_metrics(y_hat, y_true)
@@ -289,10 +294,12 @@ def train_model(model=None,
                 loss_function=None,
                 optimizer=None,
                 device=torch.device("cpu"),
-                epochs=50):
+                epochs=50,
+                writer=None):
     """
     Trains a model.
 
+    :param writer:
     :param model: Unoptimized model
     :param train_data: Data to train
     :param val_data: Data to validate
@@ -319,7 +326,8 @@ def train_model(model=None,
                               optimizer=optimizer,
                               device=device,
                               epoch_num=epoch,
-                              mode="train")
+                              mode="train",
+                              writer=writer)
 
         if val_data is not None:
             # check model against validation data
@@ -331,7 +339,8 @@ def train_model(model=None,
                                                       optimizer=None,
                                                       device=device,
                                                       epoch_num=epoch,
-                                                      mode="validation")
+                                                      mode="validation",
+                                                      writer=writer)
 
             val_loss_epoch = val_loss_epoch.mean().item()
             # print("Epoch: {}, Val_loss_epoch: {}, Best_val_loss: {}, Best_epoch: {}"
@@ -347,7 +356,7 @@ def train_model(model=None,
             best_epoch = epoch
 
     print("Training Done.....")
-    print("Best performing model on validation found at epoch: {}".format(best_epoch+1))
+    print("Best performing model on validation found at epoch: {}".format(best_epoch + 1))
 
     print("Saving model......")
     torch.save(best_model, os.path.join(MODEL_PATH, MODEL_NAME))
@@ -383,6 +392,3 @@ def test_model(model=None,
         print("F1 score on test set: {}".format(test_f1_score))
     else:
         raise FileNotFoundError("Selected model does not exist at: {}".format(test_model_path))
-
-
-

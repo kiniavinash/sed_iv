@@ -9,13 +9,15 @@ from tools.helpers import stratified_split, run_one_epoch, train_model, test_mod
 from tools.settings import DATA_DIR, SAMPLE_RATE, MEL_BANKS, \
     MIC_USED, DEVICE, EPOCHS, BATCH_SIZE, CLASS_TYPE, RANDOM_SEED, \
     CNN_CHANNELS, RNN_IN_SIZE, RNN_HH_SIZE, DROPOUT, LR, OUT_CLASSES, \
-    test_cnn_channels, test_rnn_in_size, test_rnn_hh_size, test_dropout
+    test_cnn_channels, test_rnn_in_size, test_rnn_hh_size, test_dropout, \
+    OPTIM_FUNC
 
 from models.baseline_crnn import CRNN
 
 from torchvision import transforms
 from torch import Tensor
 from torch.nn import BCEWithLogitsLoss
+from torch.utils.tensorboard import SummaryWriter
 
 
 def get_transform():
@@ -32,7 +34,7 @@ def get_transform():
     return my_transforms
 
 
-def run_train_test(parsed, train_data=None, test_data=None, val_data=None):
+def run_train_test(parsed, train_data=None, test_data=None, val_data=None, writer=None):
 
     # (train and test)/test the model
     if parsed.test is False:
@@ -42,7 +44,12 @@ def run_train_test(parsed, train_data=None, test_data=None, val_data=None):
                         rnn_hh_size=RNN_HH_SIZE,
                         cnn_dropout=DROPOUT,
                         out_classes=OUT_CLASSES).to(DEVICE)
-        my_optim = torch.optim.Adam(my_model.parameters(), lr=LR)
+
+        if OPTIM_FUNC == "Adam":
+            my_optim = torch.optim.Adam(my_model.parameters(), lr=LR)
+        else:
+            my_optim = torch.optim.SGD(my_model.parameters(), lr=LR)
+
         my_loss = BCEWithLogitsLoss()
 
         # training the model
@@ -52,7 +59,8 @@ def run_train_test(parsed, train_data=None, test_data=None, val_data=None):
                     loss_function=my_loss,
                     optimizer=my_optim,
                     device=DEVICE,
-                    epochs=EPOCHS)
+                    epochs=EPOCHS,
+                    writer=writer)
 
         test_model_type = CRNN(cnn_channels=test_cnn_channels,
                                rnn_in_size=test_rnn_in_size,
@@ -92,17 +100,22 @@ def only_static_mixed_loc(parsed):
                    val_data=val_data)
 
 
-def only_static_location_split(parsed):
+def only_static_location_split(parsed, train_set="static", test_set=None):
 
     print("==========Only Static samples - location specific split==============")
+    print("Train Set: {}, Test set: {}".format(train_set, test_set))
+
+    suffix = "_" + train_set + "_" + test_set
+    writer = SummaryWriter(comment=suffix)
 
     # set up the experiment
     my_transforms = get_transform()
 
-    train_data, val_data, test_data = category_split(train_cat="static", test_cat="driving",
+    train_data, val_data, test_data = category_split(train_cat=train_set, test_cat=test_set,
                                                      batch_size=BATCH_SIZE, seed=RANDOM_SEED,
-                                                     transform=my_transforms)
+                                                     transform=my_transforms, verbose=False)
     run_train_test(parsed,
                    train_data=train_data,
                    test_data=test_data,
-                   val_data=val_data)
+                   val_data=val_data,
+                   writer=writer)

@@ -12,7 +12,8 @@ BATCH_SIZE = 16
 CLASS_TYPE = "coarse_class"
 RANDOM_SEED = 42
 ENABLE_CLASS_COUNTING = False
-LR = 0.0005
+LR = 0.01
+OPTIM_FUNC = "Adam"
 
 # model parameters
 CNN_CHANNELS = 32
@@ -36,3 +37,4 @@ elif CLASS_TYPE == "coarse_class":
     OUT_CLASSES = 2
 else:
     raise ValueError("Error in class type selection!")
+

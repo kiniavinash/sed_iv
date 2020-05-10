@@ -48,4 +48,27 @@ if __name__ == '__main__':
     parsed = parse_args()
 
     # only_static_mixed_loc(parsed)
-    only_static_location_split(parsed)
+    train_test_combos = [("static", "driving"),
+                         ("driving", "static"),
+                         ("SA", "SB"),
+                         ("SB", "SA"),
+                         ("SA", "DA"),
+                         ("SA", "DB"),
+                         ("SB", "DA"),
+                         ("SB", "DB"),
+                         ("SA2", "DA"),
+                         ("SB2", "DB"),
+                         ("SA1", "SA2"),
+                         ("SA2", "SA1"),
+                         ("SB12", "SB3"),
+                         ("SB23", "SB1"),
+                         ("SB31", "SB2"),
+                         ("static", None),
+                         ("driving", None),
+                         ("SA", None),
+                         ("SB", None),
+                         ("DA", None),
+                         ("DB", None)]
+
+    for combo in train_test_combos:
+        only_static_location_split(parsed, combo[0], combo[1])
