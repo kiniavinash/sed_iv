@@ -12,7 +12,7 @@ from torch.utils.data import SubsetRandomSampler, DataLoader
 
 from .metrics import f1_per_frame, weak_label_metrics
 from .settings import MODEL_PATH, MODEL_NAME, test_model_name, ENABLE_CLASS_COUNTING, DATA_DIR, CLASS_TYPE,\
-    BATCH_SIZE, RANDOM_SEED
+    BATCH_SIZE, RANDOM_SEED, REF_LABELS
 from .dataset_spec import PriusData
 
 from tqdm import tqdm
@@ -31,7 +31,7 @@ def get_samples_per_class(data_idx, dataset, enable_counting=False):
         data_sampler = SubsetRandomSampler(data_idx)
         _dataloader = DataLoader(dataset, batch_size=1, sampler=data_sampler)
 
-        class_dist = {k: 0 for k in dataset.classes}
+        class_dist = {k: 0 for k in REF_LABELS}
         for idx, (_, _, weak_label) in enumerate(_dataloader):
             class_dist[weak_label[0]] += 1
 
@@ -56,11 +56,16 @@ def category_split(train_cat=None,
                                                                  verbose=verbose)
         return train_loader, val_loader, test_loader
     else:
-        train_loader, val_loader = stratified_split(train_dataset, test_split=val_split, mode="two_split",
-                                                    batch_size=batch_size, seed=seed, verbose=False)
+        train_loader, val_loader, distribution = stratified_split(train_dataset, test_split=val_split,
+                                                                  mode="two_split_cat", batch_size=batch_size,
+                                                                  seed=seed, verbose=False)
 
         test_dataset = PriusData(DATA_DIR, transform=transform, mode=test_cat, class_type=CLASS_TYPE)
         test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers)
+
+        test_dist = get_samples_per_class(np.arange(len(test_dataset)), test_dataset, ENABLE_CLASS_COUNTING)
+        entire_dataset = torch.utils.data.ConcatDataset([train_dataset, test_dataset])
+        data_dist = get_samples_per_class(np.arange(len(train_dataset)+len(test_dataset)), entire_dataset, ENABLE_CLASS_COUNTING)
 
         if verbose:
             print("""
@@ -70,10 +75,10 @@ def category_split(train_cat=None,
             Training: {}, {}
             Validation: {}, {}
             Testing: {}, {}
-            ---------------""".format(len(train_dataset) + len(test_dataset), None,
-                                      len(train_dataset) - len(val_loader) * batch_size, "Estimated",
-                                      len(val_loader) * batch_size, "Estimated",
-                                      len(test_dataset), None))
+            ---------------""".format(len(train_dataset) + len(test_dataset), data_dist,
+                                      distribution[0], distribution[1],
+                                      distribution[2], distribution[3],
+                                      len(test_dataset), test_dist))
 
         return train_loader, val_loader, test_loader
 
@@ -101,13 +106,13 @@ def stratified_split(dataset,
     """
 
     labels = dataset.targets
-    avail_modes = ["three_split", "two_split"]
+    avail_modes = ["three_split", "two_split", "two_split_cat"]
 
     if mode == avail_modes[0]:
         train_val_idx, test_idx = train_test_split(np.arange(len(labels)), test_size=test_split, shuffle=True,
                                                    stratify=labels, random_state=seed)
         train_idx, val_idx = train_test_split(train_val_idx, test_size=val_split, shuffle=True,
-                                              stratify=labels[train_val_idx], random_state=seed)
+                                              stratify=labels.iloc[train_val_idx], random_state=seed)
 
         train_sampler = SubsetRandomSampler(train_idx)
         val_sampler = SubsetRandomSampler(val_idx)
@@ -161,6 +166,22 @@ def stratified_split(dataset,
                                       len(train_idx), train_dist,
                                       len(test_idx), test_dist))
         return train_loader, test_loader
+    elif mode == avail_modes[2]:
+        train_idx, test_idx = train_test_split(np.arange(len(labels)), test_size=test_split, shuffle=True,
+                                               stratify=labels, random_state=seed)
+
+        train_sampler = SubsetRandomSampler(train_idx)
+        test_sampler = SubsetRandomSampler(test_idx)
+
+        train_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, sampler=train_sampler)
+        test_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, sampler=test_sampler)
+
+        train_dist = get_samples_per_class(train_idx, dataset, ENABLE_CLASS_COUNTING)
+        test_dist = get_samples_per_class(test_idx, dataset, ENABLE_CLASS_COUNTING)
+
+        distribution = [len(train_idx), train_dist, len(test_idx), test_dist]
+
+        return train_loader, test_loader, distribution
     else:
         raise ValueError("Invalid mode ({}) selected. Select among: {}".format(mode, avail_modes))
 
