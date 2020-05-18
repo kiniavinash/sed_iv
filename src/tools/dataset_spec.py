@@ -84,21 +84,24 @@ class PriusData(Dataset):
 
         s_rate, data = wavfile.read(file_location)
 
-        if self.transform is not None:
-            data = self.transform(data)
+        if data.shape[0] == 1*s_rate:    # temporary fix - some samples are corrupted in engineOn-1-2-0.5
+            if self.transform is not None:
+                data = self.transform(data)
+            else:
+                data = data
+
+            label = self.rel_data[self.class_type].iloc[idx]
+            weak_label = label
+
+            if self.label_type == "strong_label":
+                label = self.get_strong_labels(weak_label, data.shape[1])
+            elif self.label_type not in self.avail_label_t:
+                raise ValueError("Selected label type ({}) not available. Choose from: {}"
+                                 .format(self.label_type, self.avail_label_t))
+
+            return data, label, weak_label
         else:
-            data = data
-
-        label = self.rel_data[self.class_type].iloc[idx]
-        weak_label = label
-
-        if self.label_type == "strong_label":
-            label = self.get_strong_labels(weak_label, data.shape[1])
-        elif self.label_type not in self.avail_label_t:
-            raise ValueError("Selected label type ({}) not available. Choose from: {}"
-                             .format(self.label_type, self.avail_label_t))
-
-        return data, label, weak_label
+            return None
 
     def get_strong_labels(self, label, t_size):
         """
@@ -130,3 +133,13 @@ class PriusData(Dataset):
                 strong_label[3, :] = strong_label[3, :] + label_tensor
 
         return strong_label
+
+
+class JoinDataset(PriusData):
+
+    def __init__(self, root_dir, dataset_1, dataset_2):
+        super().__init__(root_dir)
+
+        self.rel_data = pd.concat([dataset_1.rel_data, dataset_2.rel_data])
+        self.targets = pd.concat([dataset_1.targets, dataset_2.targets])
+        self.transform = dataset_1.transform

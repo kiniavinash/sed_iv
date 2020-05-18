@@ -74,7 +74,7 @@ def get_per_class_iou(C):
     return pc_accuracies
 
 
-def weak_label_metrics(y_hat, y_true):
+def weak_label_metrics(y_hat, y_true, verbose=True):
     y_hat_weak = get_weak_labels(y_hat)
     y_true_weak = get_weak_labels(y_true)
 
@@ -85,30 +85,37 @@ def weak_label_metrics(y_hat, y_true):
     conf_mat = pd.DataFrame(conf_mat_uf,
                             index=['True:' + lbl for lbl in REF_LABELS],
                             columns=['Pred:' + lbl for lbl in REF_LABELS])
-    print("Confusion Matrix : ")
-    print(conf_mat)
-    print("=======")
 
     # compute overall accuracy
     accuracy = accuracy_score(y_true_weak, y_hat_weak)
-    print("Overall Accuracy: {}".format(accuracy))
-    print("=======")
-
-    # compute per class accuracy
-    per_class_acc_uf = get_per_class_acc(conf_mat_uf)
-    per_class_acc = pd.DataFrame(per_class_acc_uf,
-                                 columns=["Per Class Accuracy"],
-                                 index=REF_LABELS)
-    print("{}".format(per_class_acc))
-    print("========")
 
     # compute Jaccard Index per class
     per_class_iou_uf = get_per_class_iou(conf_mat_uf)
     per_class_iou = pd.DataFrame(per_class_iou_uf,
                                  columns=["Per Class IoU"],
                                  index=REF_LABELS)
-    print("{}".format(per_class_iou))
-    print("========")
+
+    # # compute per class accuracy
+    # per_class_acc_uf = get_per_class_acc(conf_mat_uf)
+    # per_class_acc = pd.DataFrame(per_class_acc_uf,
+    #                              columns=["Per Class Accuracy"],
+    #                              index=REF_LABELS)
+
+    if verbose:
+        print("Confusion Matrix : ")
+        print(conf_mat)
+        print("=======")
+
+        print("Overall Accuracy: {}".format(accuracy))
+        print("=======")
+
+        # print("{}".format(per_class_acc))
+        # print("========")
+
+        print("{}".format(per_class_iou))
+        print("========")
+
+    return conf_mat, accuracy
 
 
 def f1_per_frame(y_hat, y_true):

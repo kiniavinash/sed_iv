@@ -8,14 +8,26 @@ import os
 from sklearn.model_selection import train_test_split
 from copy import deepcopy
 
-from torch.utils.data import SubsetRandomSampler, DataLoader
+from torch.utils.data import SubsetRandomSampler, DataLoader, ConcatDataset
+from torch.utils.data._utils.collate import default_collate
 
 from .metrics import f1_per_frame, weak_label_metrics
-from .settings import MODEL_PATH, MODEL_NAME, test_model_name, ENABLE_CLASS_COUNTING, DATA_DIR, CLASS_TYPE,\
+from .settings import MODEL_PATH, MODEL_NAME, test_model_name, ENABLE_CLASS_COUNTING, DATA_DIR, CLASS_TYPE, \
     BATCH_SIZE, RANDOM_SEED, REF_LABELS
-from .dataset_spec import PriusData
+from .dataset_spec import PriusData, JoinDataset
 
 from tqdm import tqdm
+from datetime import datetime
+
+
+def my_collate(batch):
+    """
+    Custom collate function, if there  is an error in .wav files, skip 'em
+    :param batch:
+    :return:
+    """
+    batch = list(filter(lambda x: x is not None, batch))
+    return default_collate(batch)
 
 
 def get_samples_per_class(data_idx, dataset, enable_counting=False):
@@ -29,7 +41,7 @@ def get_samples_per_class(data_idx, dataset, enable_counting=False):
     """
     if enable_counting is True:
         data_sampler = SubsetRandomSampler(data_idx)
-        _dataloader = DataLoader(dataset, batch_size=1, sampler=data_sampler)
+        _dataloader = DataLoader(dataset, batch_size=1, sampler=data_sampler, collate_fn=my_collate)
 
         class_dist = {k: 0 for k in REF_LABELS}
         for idx, (_, _, weak_label) in enumerate(_dataloader):
@@ -61,11 +73,14 @@ def category_split(train_cat=None,
                                                                   seed=seed, verbose=False)
 
         test_dataset = PriusData(DATA_DIR, transform=transform, mode=test_cat, class_type=CLASS_TYPE)
-        test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers)
+        test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers, collate_fn=my_collate)
 
         test_dist = get_samples_per_class(np.arange(len(test_dataset)), test_dataset, ENABLE_CLASS_COUNTING)
-        entire_dataset = torch.utils.data.ConcatDataset([train_dataset, test_dataset])
-        data_dist = get_samples_per_class(np.arange(len(train_dataset)+len(test_dataset)), entire_dataset, ENABLE_CLASS_COUNTING)
+
+        entire_dataset = ConcatDataset([train_dataset, test_dataset])
+        data_dist = get_samples_per_class(np.arange(len(train_dataset) + len(test_dataset)),
+                                          entire_dataset,
+                                          ENABLE_CLASS_COUNTING)
 
         if verbose:
             print("""
@@ -81,6 +96,46 @@ def category_split(train_cat=None,
                                       len(test_dataset), test_dist))
 
         return train_loader, val_loader, test_loader
+
+
+def join_dataset(data_cat,
+                 transform=None):
+    dataset = PriusData(DATA_DIR, transform=transform, mode=data_cat[0], class_type=CLASS_TYPE)
+
+    for num_set in range(1, len(data_cat)):
+        temp_dataset = PriusData(DATA_DIR, transform=transform, mode=data_cat[num_set], class_type=CLASS_TYPE)
+        dataset = JoinDataset(DATA_DIR, dataset, temp_dataset)
+
+    return dataset
+
+
+def combo_split(train_cat=None,
+                test_cat=None,
+                val_split=0.2,
+                batch_size=1,
+                num_workers=1,
+                seed=None,
+                transform=None,
+                verbose=True):
+    if type(train_cat) is tuple:
+        train_dataset = join_dataset(train_cat, transform=transform)
+    elif type(train_cat) is not tuple:
+        train_dataset = PriusData(DATA_DIR, transform=transform, mode=train_cat, class_type=CLASS_TYPE)
+
+    if type(test_cat) is tuple:
+        test_dataset = join_dataset(test_cat, transform=transform)
+    elif type(test_cat) is not tuple:
+        test_dataset = PriusData(DATA_DIR, transform=transform, mode=test_cat, class_type=CLASS_TYPE)
+
+    train_loader, val_loader = stratified_split(train_dataset,
+                                                mode="two_split",
+                                                batch_size=batch_size,
+                                                test_split=val_split,
+                                                seed=seed,
+                                                verbose=verbose)
+    test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers, collate_fn=my_collate)
+
+    return train_loader, val_loader, test_loader
 
 
 def stratified_split(dataset,
@@ -107,6 +162,7 @@ def stratified_split(dataset,
 
     labels = dataset.targets
     avail_modes = ["three_split", "two_split", "two_split_cat"]
+    drop_last = False
 
     if mode == avail_modes[0]:
         train_val_idx, test_idx = train_test_split(np.arange(len(labels)), test_size=test_split, shuffle=True,
@@ -118,9 +174,12 @@ def stratified_split(dataset,
         val_sampler = SubsetRandomSampler(val_idx)
         test_sampler = SubsetRandomSampler(test_idx)
 
-        train_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, sampler=train_sampler)
-        val_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, sampler=val_sampler)
-        test_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, sampler=test_sampler)
+        train_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, sampler=train_sampler,
+                                  collate_fn=my_collate, drop_last=drop_last)
+        val_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, sampler=val_sampler,
+                                collate_fn=my_collate, drop_last=drop_last)
+        test_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, sampler=test_sampler,
+                                 collate_fn=my_collate, drop_last=drop_last)
 
         data_dist = get_samples_per_class(np.arange(len(dataset)), dataset, ENABLE_CLASS_COUNTING)
         train_dist = get_samples_per_class(train_idx, dataset, ENABLE_CLASS_COUNTING)
@@ -141,6 +200,7 @@ def stratified_split(dataset,
                                       len(test_idx), test_dist))
 
         return train_loader, val_loader, test_loader
+
     elif mode == avail_modes[1]:
         train_idx, test_idx = train_test_split(np.arange(len(labels)), test_size=test_split, shuffle=True,
                                                stratify=labels, random_state=seed)
@@ -148,8 +208,10 @@ def stratified_split(dataset,
         train_sampler = SubsetRandomSampler(train_idx)
         test_sampler = SubsetRandomSampler(test_idx)
 
-        train_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, sampler=train_sampler)
-        test_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, sampler=test_sampler)
+        train_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, sampler=train_sampler,
+                                  collate_fn=my_collate, drop_last=drop_last)
+        test_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, sampler=test_sampler,
+                                 collate_fn=my_collate, drop_last=drop_last)
 
         data_dist = get_samples_per_class(np.arange(len(dataset)), dataset, ENABLE_CLASS_COUNTING)
         train_dist = get_samples_per_class(train_idx, dataset, ENABLE_CLASS_COUNTING)
@@ -166,6 +228,7 @@ def stratified_split(dataset,
                                       len(train_idx), train_dist,
                                       len(test_idx), test_dist))
         return train_loader, test_loader
+
     elif mode == avail_modes[2]:
         train_idx, test_idx = train_test_split(np.arange(len(labels)), test_size=test_split, shuffle=True,
                                                stratify=labels, random_state=seed)
@@ -173,8 +236,10 @@ def stratified_split(dataset,
         train_sampler = SubsetRandomSampler(train_idx)
         test_sampler = SubsetRandomSampler(test_idx)
 
-        train_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, sampler=train_sampler)
-        test_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, sampler=test_sampler)
+        train_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, sampler=train_sampler,
+                                  collate_fn=my_collate, drop_last=drop_last)
+        test_loader = DataLoader(dataset, batch_size=batch_size, num_workers=num_workers, sampler=test_sampler,
+                                 collate_fn=my_collate, drop_last=drop_last)
 
         train_dist = get_samples_per_class(train_idx, dataset, ENABLE_CLASS_COUNTING)
         test_dist = get_samples_per_class(test_idx, dataset, ENABLE_CLASS_COUNTING)
@@ -182,6 +247,7 @@ def stratified_split(dataset,
         distribution = [len(train_idx), train_dist, len(test_idx), test_dist]
 
         return train_loader, test_loader, distribution
+
     else:
         raise ValueError("Invalid mode ({}) selected. Select among: {}".format(mode, avail_modes))
 
@@ -217,10 +283,12 @@ def run_one_epoch(model=None,
                   device=torch.device("cpu"),
                   epoch_num=1,
                   mode="train",
-                  writer=None):
+                  writer=None,
+                  verbose=True):
     """
     Runs one epoch for either training, validation or testing.
 
+    :param verbose:
     :param writer:
     :param model: Unoptimized/Optimized model
     :param data: Data to be trained/validated/tested
@@ -305,8 +373,8 @@ def run_one_epoch(model=None,
             writer.add_scalar('Loss/{}'.format(mode), all_losses.mean().item(), epoch_num)
         return model, all_losses
     elif mode == "test":
-        weak_label_metrics(y_hat, y_true)
-        return model, f1_score
+        conf_mat, accuracy = weak_label_metrics(y_hat.sigmoid(), y_true, verbose)
+        return model, f1_score, conf_mat, accuracy
 
 
 def train_model(model=None,
@@ -316,10 +384,14 @@ def train_model(model=None,
                 optimizer=None,
                 device=torch.device("cpu"),
                 epochs=50,
-                writer=None):
+                writer=None,
+                seed=None,
+                suffix=""):
     """
     Trains a model.
 
+    :param suffix:
+    :param seed:
     :param writer:
     :param model: Unoptimized model
     :param train_data: Data to train
@@ -380,15 +452,26 @@ def train_model(model=None,
     print("Best performing model on validation found at epoch: {}".format(best_epoch + 1))
 
     print("Saving model......")
-    torch.save(best_model, os.path.join(MODEL_PATH, MODEL_NAME))
+    model_dir = os.path.join(MODEL_PATH, suffix)
+    if not os.path.exists(model_dir):
+        os.mkdir(model_dir)
+    torch.save(best_model, os.path.join(model_dir, str(seed) + "_" + MODEL_NAME))
 
 
 def test_model(model=None,
                test_data=None,
-               device=torch.device("cpu")):
+               device=torch.device("cpu"),
+               verbose=True,
+               suffix="",
+               seed=None,
+               model_path=None):
     """
     Tests a given model
 
+    :param verbose:
+    :param suffix:
+    :param seed:
+    :param model_path:
     :param model: Optimized/Trained model to test
     :param test_data: Test data
     :param device: Device to carry out the process on (CPU/CUDA)
@@ -398,18 +481,26 @@ def test_model(model=None,
     if model is None:
         raise ValueError("No model to test...")
 
-    test_model_path = os.path.join(MODEL_PATH, test_model_name)
+    if model_path is None:
+        test_model_dir = os.path.join(MODEL_PATH, suffix)
+        test_model_path = os.path.join(test_model_dir, str(seed) + "_" + test_model_name)
+    else:
+        test_model_path = model_path
+
     if os.path.exists(test_model_path):
         model.load_state_dict(torch.load(test_model_path))
         model = model.eval()
         with torch.no_grad():
-            _, test_f1_score = run_one_epoch(model=model,
-                                             data=test_data,
-                                             loss_function=None,
-                                             optimizer=None,
-                                             device=device,
-                                             mode="test")
+            _, test_f1_score, test_conf_mat, test_accuracy = run_one_epoch(model=model,
+                                                                           data=test_data,
+                                                                           loss_function=None,
+                                                                           optimizer=None,
+                                                                           device=device,
+                                                                           mode="test",
+                                                                           verbose=verbose)
+        if verbose:
+            print("F1 score on test set: {}".format(test_f1_score))
 
-        print("F1 score on test set: {}".format(test_f1_score))
+        return test_f1_score, test_conf_mat, test_accuracy
     else:
         raise FileNotFoundError("Selected model does not exist at: {}".format(test_model_path))
