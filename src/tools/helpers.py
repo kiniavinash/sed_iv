@@ -14,7 +14,7 @@ from torch.utils.data._utils.collate import default_collate
 from .metrics import f1_per_frame, weak_label_metrics
 from .settings import MODEL_PATH, MODEL_NAME, test_model_name, ENABLE_CLASS_COUNTING, DATA_DIR, CLASS_TYPE, \
     BATCH_SIZE, RANDOM_SEED, REF_LABELS
-from .dataset_spec import PriusData, JoinDataset
+from .dataset_spec import PriusData, JoinDataset, BagSplitData
 
 from tqdm import tqdm
 from datetime import datetime
@@ -104,7 +104,7 @@ def join_dataset(data_cat,
 
     for num_set in range(1, len(data_cat)):
         temp_dataset = PriusData(DATA_DIR, transform=transform, mode=data_cat[num_set], class_type=CLASS_TYPE)
-        dataset = JoinDataset(DATA_DIR, dataset, temp_dataset)
+        dataset = JoinDataset(dataset, temp_dataset)
 
     return dataset
 
@@ -134,6 +134,33 @@ def combo_split(train_cat=None,
                                                 seed=seed,
                                                 verbose=verbose)
     test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers, collate_fn=my_collate)
+
+    return train_loader, val_loader, test_loader
+
+
+def bag_split(data_cat=None,
+              batch_size=1,
+              seed=42,
+              transform=None,
+              num_workers=1,
+              verbose=True):
+
+    if data_cat is None:
+        data_cat = "static"
+        raise Warning("Using static set as train set")
+
+    dataset = PriusData(DATA_DIR, transform=transform, mode=data_cat, class_type=CLASS_TYPE)
+
+    train_split = BagSplitData(dataset, mode="train", seed=seed)
+    test_split = BagSplitData(dataset, mode="test", seed=seed)
+
+    train_loader, val_loader = stratified_split(train_split,
+                                                mode="two_split",
+                                                batch_size=batch_size,
+                                                test_split=0.2,
+                                                seed=seed,
+                                                verbose=verbose)
+    test_loader = DataLoader(test_split, batch_size=batch_size, num_workers=num_workers, collate_fn=my_collate)
 
     return train_loader, val_loader, test_loader
 
@@ -202,6 +229,7 @@ def stratified_split(dataset,
         return train_loader, val_loader, test_loader
 
     elif mode == avail_modes[1]:
+
         train_idx, test_idx = train_test_split(np.arange(len(labels)), test_size=test_split, shuffle=True,
                                                stratify=labels, random_state=seed)
 
@@ -328,6 +356,7 @@ def run_one_epoch(model=None,
     y_hat, y_true = [], []
 
     for idx, (sample, label, _) in enumerate(data):
+        # print("sample.shape: {}".format(sample.shape))
         # setting all gradients to zero, apparently useful,
         # see: https://stackoverflow.com/questions/48001598/why-do-we-need-to-call-zero-grad-in-pytorch
         if optimizer is not None:

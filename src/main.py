@@ -1,13 +1,14 @@
 import sys
 import argparse
-
+import os
 import pandas as pd
 import numpy as np
 
-from tools.settings import REF_LABELS
+from tools.settings import REF_LABELS, DATA_DIR
 
-from experiments import only_static_mixed_loc, custom_train_test_split
+from experiments import only_static_mixed_loc, custom_train_test_split, window_length_exp
 
+from sklearn.model_selection import train_test_split
 
 def parse_args():
     class ExtractorArgsParser(argparse.ArgumentParser):
@@ -50,39 +51,127 @@ if __name__ == '__main__':
 
     parsed = parse_args()
 
-    # only_static_mixed_loc(parsed)
+    # combo experiment
+    # # only_static_mixed_loc(parsed)
+    #
+    # train_test_combos = [
+    #     ("static", None),
+    #     ("driving", None),
+    #     ("SA", None),
+    #     ("SB", None),
+    #     ("DA", None),
+    #     ("DB", None),
+    #     # ("static", "driving"),
+    #     # ("static", "DA"),
+    #     # ("static", "DB"),
+    #     # ("SA", "driving"),
+    #     # ("SB", "driving"),
+    #     # ("SA", "DA"),
+    #     # ("SB", "DB"),
+    #     # ("SA2", "driving"),
+    #     # ("SB2", "driving"),
+    #     # ("SA2", "DA"),
+    #     # ("SB2", "DB"),
+    #     # ("driving", None),
+    #     # ("DA", None),
+    #     # ("DB", None),
+    #     # # # ===============
+    #     # (("static", "DA"), "DB"),
+    #     # (("static", "DB"), "DA"),
+    #     # (("SA", "DB"), "DA"),
+    #     # (("SB", "DA"), "DB"),
+    #     # (("SA2", "DB"), "DA"),
+    #     # (("SB2", "DA"), "DB"),
+    #     # # # =================
+    #     # (("SA2", "DA"), "DA"),
+    #     # (("SB2", "DB"), "DB"),
+    #     # (("static", "driving"), "driving"),
+    # ]
+    #
+    # random_seeds = [1, 56, 93]  # , 783, 832]
+    #
+    # # only for single category in train and test each
+    # for combo in train_test_combos:
+    #     f1_score_avg = []
+    #     conf_mat_avg = pd.DataFrame()
+    #     over_acc_avg = []
+    #
+    #     for seed in random_seeds:
+    #         f1_score, conf_mat, over_acc = custom_train_test_split(parsed, combo[0], combo[1], seed)
+    #         f1_score_avg.append(f1_score)
+    #         conf_mat_avg = conf_mat_avg.add(conf_mat, fill_value=0)
+    #         over_acc_avg.append(over_acc)
+    #
+    #     f1_score_avg = np.array(f1_score_avg)
+    #     over_acc_avg = np.array(over_acc_avg)
+    #
+    #     print("Average Statistics:")
+    #     print("Mean F1 score (strong labels): {} +/- {}".format(np.mean(f1_score_avg), np.std(f1_score_avg)))
+    #     print("Confusion matrix (summed):")
+    #     print(conf_mat_avg)
+    #     print("Mean accuracy (weak labels): {} +/- {}".format(np.mean(over_acc_avg), np.std(over_acc_avg)))
+    #     print("===========************************===================")
+    #
+    # # train_test_combos = [
+    # #     # ("static", "driving"),
+    # #     # ("driving", "static"),
+    # #     # ("SA", "SB"),
+    # #     # ("SB", "SA"),
+    # #     # ("SA", "DA"),
+    # #     # ("SA", "DB"),
+    # #     # ("SB", "DA"),
+    # #     # ("SB", "DB"),
+    # #     # ("SA2", "DA"),
+    # #     # ("SB2", "DB"),
+    # #     # ("SA1", "SA2"),
+    # #     # ("SA2", "SA1"),
+    # #     # ("SB12", "SB3"),
+    # #     # ("SB23", "SB1"),
+    # #     # ("SB31", "SB2"),
+    # #     # ("static", None),
+    # #     # ("driving", None),
+    # #     # ("SA", None),
+    # #     # ("SB", None),
+    # #     # ("DA", None),
+    # #     # ("DB", None),
+    # #     # ("DA", "SA"),
+    # #     # ("DB", "SB"),
+    # #     # ("SB2", "SB1"),
+    # #     # ("SB1", "SB2"),
+    # #     # ("SB3", "SB1"),
+    # #     # ("SB1", "SB3"),
+    # #     # ("SB3", "SB2"),
+    # #     # ("SB2", "SB3"),
+    # #     # ("SA", "driving"),
+    # #     # ("SB", "driving"),
+    # #     # ("static", "DA"),
+    # #     # ("static", "DB"),
+    # #     # ("DA", "DB"),
+    # #     # ("DB", "DA"),
+    # #     # ("SA1", None),
+    # #     # ("SA2", None),
+    # #     # ("SB1", None),
+    # #     # ("SB2", None),
+    # #     # ("SB3", None),
+    # #     # ("SB12", None),
+    # #     # ("SB23", None),
+    # #     # ("SB31", None),
+    # #     # ("driving", "SA"),
+    # #     # ("driving", "SB"),
+    # #     # ("SA2", "SB2"),
+    # #     # ("SB2", "SA2"),
+    # #     # # ===============
+    # #     # # (("static", "DA"), "DB")
+    # # ]
+
+    # bag split
     train_test_combos = [
-        ("static", None),
+        # ("static", None),
         ("driving", None),
-        ("SA", None),
-        ("SB", None),
-        ("DA", None),
-        ("DB", None),
-        # ("static", "driving"),
-        # ("static", "DA"),
-        # ("static", "DB"),
-        # ("SA", "driving"),
-        # ("SB", "driving"),
-        # ("SA", "DA"),
-        # ("SB", "DB"),
-        # ("SA2", "driving"),
-        # ("SB2", "driving"),
-        # ("SA2", "DA"),
-        # ("SB2", "DB"),
-        # ("driving", None),
+        # ("SA", None),
+        # ("SB", None),
         # ("DA", None),
-        # ("DB", None),
-        # # # ===============
-        # (("static", "DA"), "DB"),
-        # (("static", "DB"), "DA"),
-        # (("SA", "DB"), "DA"),
-        # (("SB", "DA"), "DB"),
-        # (("SA2", "DB"), "DA"),
-        # (("SB2", "DA"), "DB"),
-        # # # =================
-        # (("SA2", "DA"), "DA"),
-        # (("SB2", "DB"), "DB"),
-        # (("static", "driving"), "driving"),
+        # ("DB", None)
     ]
 
     random_seeds = [1, 56, 93]  # , 783, 832]
@@ -94,7 +183,7 @@ if __name__ == '__main__':
         over_acc_avg = []
 
         for seed in random_seeds:
-            f1_score, conf_mat, over_acc = custom_train_test_split(parsed, combo[0], combo[1], seed)
+            f1_score, conf_mat, over_acc = window_length_exp(parsed, data_set=combo[0], seed=42)
             f1_score_avg.append(f1_score)
             conf_mat_avg = conf_mat_avg.add(conf_mat, fill_value=0)
             over_acc_avg.append(over_acc)
@@ -109,54 +198,3 @@ if __name__ == '__main__':
         print("Mean accuracy (weak labels): {} +/- {}".format(np.mean(over_acc_avg), np.std(over_acc_avg)))
         print("===========************************===================")
 
-    # train_test_combos = [
-    #     # ("static", "driving"),
-    #     # ("driving", "static"),
-    #     # ("SA", "SB"),
-    #     # ("SB", "SA"),
-    #     # ("SA", "DA"),
-    #     # ("SA", "DB"),
-    #     # ("SB", "DA"),
-    #     # ("SB", "DB"),
-    #     # ("SA2", "DA"),
-    #     # ("SB2", "DB"),
-    #     # ("SA1", "SA2"),
-    #     # ("SA2", "SA1"),
-    #     # ("SB12", "SB3"),
-    #     # ("SB23", "SB1"),
-    #     # ("SB31", "SB2"),
-    #     # ("static", None),
-    #     # ("driving", None),
-    #     # ("SA", None),
-    #     # ("SB", None),
-    #     # ("DA", None),
-    #     # ("DB", None),
-    #     # ("DA", "SA"),
-    #     # ("DB", "SB"),
-    #     # ("SB2", "SB1"),
-    #     # ("SB1", "SB2"),
-    #     # ("SB3", "SB1"),
-    #     # ("SB1", "SB3"),
-    #     # ("SB3", "SB2"),
-    #     # ("SB2", "SB3"),
-    #     # ("SA", "driving"),
-    #     # ("SB", "driving"),
-    #     # ("static", "DA"),
-    #     # ("static", "DB"),
-    #     # ("DA", "DB"),
-    #     # ("DB", "DA"),
-    #     # ("SA1", None),
-    #     # ("SA2", None),
-    #     # ("SB1", None),
-    #     # ("SB2", None),
-    #     # ("SB3", None),
-    #     # ("SB12", None),
-    #     # ("SB23", None),
-    #     # ("SB31", None),
-    #     # ("driving", "SA"),
-    #     # ("driving", "SB"),
-    #     # ("SA2", "SB2"),
-    #     # ("SB2", "SA2"),
-    #     # # ===============
-    #     # # (("static", "DA"), "DB")
-    # ]

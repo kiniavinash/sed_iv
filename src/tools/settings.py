@@ -4,12 +4,18 @@ import os
 from datetime import datetime
 
 # hyperparameters
-DATA_DIR = "../../data/engineOnData-1-0-0"
+SAMPLE_LENGTH = 1  # stupid work around to avoid errors due to corrupted samples
+DATA_DIR = "/media/micarray/Seagate_8TB/results/BCC_combined/labeled_data/engineOnData-" + str(SAMPLE_LENGTH) + "-0-0/data"
 RUN_START = datetime.now().strftime("%b%d_%H-%M-%S")
 MODEL_PATH = "saved_models/" + RUN_START + "/"
+
 SAMPLE_RATE = 47998
 MEL_BANKS = 128
 MIC_USED = 5  # mic number used
+N_FFT = 2048
+OVERLAP = 0.5
+WINDOW = 'hamming'
+
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 EPOCHS = 150
 BATCH_SIZE = 8

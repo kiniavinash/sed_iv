@@ -5,12 +5,13 @@ import matplotlib.pyplot as plt
 import librosa.display
 
 from tools.dataset_spec import PriusData
-from tools.helpers import stratified_split, run_one_epoch, train_model, test_model, category_split, combo_split
+from tools.helpers import stratified_split, run_one_epoch, train_model, \
+    test_model, category_split, combo_split, bag_split
 from tools.settings import DATA_DIR, SAMPLE_RATE, MEL_BANKS, \
     MIC_USED, DEVICE, EPOCHS, BATCH_SIZE, CLASS_TYPE, RANDOM_SEED, \
     CNN_CHANNELS, RNN_IN_SIZE, RNN_HH_SIZE, DROPOUT, LR, OUT_CLASSES, \
     test_cnn_channels, test_rnn_in_size, test_rnn_hh_size, test_dropout, \
-    OPTIM_FUNC
+    OPTIM_FUNC, N_FFT, OVERLAP, WINDOW
 
 from models.baseline_crnn import CRNN
 
@@ -26,7 +27,9 @@ def get_transform():
         # lambda x: x.astype(np.float32) / np.max(x), # rescale to -1 to 1
         # lambda x: librosa.feature.mfcc(x, sr=44100, n_mfcc=40), # MFCC
         lambda x: np.asfortranarray(x[:, MIC_USED]),
-        lambda x: librosa.feature.melspectrogram(y=x, sr=SAMPLE_RATE, n_mels=MEL_BANKS, fmax=SAMPLE_RATE // 2),
+        lambda x: librosa.feature.melspectrogram(y=x, sr=SAMPLE_RATE, n_mels=MEL_BANKS, fmax=SAMPLE_RATE // 2,
+                                                 n_fft=N_FFT, hop_length=int(N_FFT*OVERLAP), window=WINDOW),
+        # lambda x: librosa.power_to_db(x, ref=np.max),
         lambda x: Tensor(x)
     ])
 
@@ -163,4 +166,32 @@ def custom_train_test_split(parsed, train_set="static", test_set=None, seed=None
                                                                      seed=seed,
                                                                      verbose=False,
                                                                      suffix=suffix)
+    return test_f1_score, test_conf_mat, test_accuracy
+
+
+def window_length_exp(parsed, data_set="static", seed=None):
+    # change DATA_DIR in the settings file as required
+    print("========================================================")
+    print("Data Set: {}".format(data_set))
+    # set up the experiment
+    my_transforms = get_transform()
+
+    suffix = "bagSplit_train_test_" + data_set
+
+    writer = SummaryWriter(comment=suffix)
+
+    train_data, val_data, test_data = bag_split(data_cat=data_set,
+                                                batch_size=BATCH_SIZE,
+                                                seed=seed,
+                                                transform=my_transforms,
+                                                verbose=False)
+
+    test_f1_score, test_conf_mat, test_accuracy = run_train_test(parsed,
+                                                                 train_data=train_data,
+                                                                 test_data=test_data,
+                                                                 val_data=val_data,
+                                                                 writer=writer,
+                                                                 seed=seed,
+                                                                 verbose=True,
+                                                                 suffix=suffix)
     return test_f1_score, test_conf_mat, test_accuracy

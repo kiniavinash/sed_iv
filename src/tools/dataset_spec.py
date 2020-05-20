@@ -8,7 +8,9 @@ from torch import Tensor
 from scipy.io import wavfile
 from torchvision import transforms
 from torch.utils.data.dataset import Dataset
+from sklearn.model_selection import train_test_split
 
+from .settings import SAMPLE_LENGTH
 
 class PriusData(Dataset):
 
@@ -29,7 +31,7 @@ class PriusData(Dataset):
         self.avail_category_modes = ["SA", "SB", "SA1", "SA2", "SB1", "SB2", "SB3",
                                      "SB12", "SB23", "SB31", "DA", "DB"]
         self.location_labels = {"SA1": ["AnnaBoogerd"], "SA2": ["Kwekerij"], "SB1": ["Willem", "TanthofBackup"],
-                                "SB2": ["Vermeerstraat"] , "SB3": ["Geerboogerd"],
+                                "SB2": ["Vermeerstraat"], "SB3": ["Geerboogerd"],
                                 "SB12": ["Willem", "TanthofBackup", "Vermeerstraat"],
                                 "SB23": ["Vermeerstraat", "Geerboogerd"],
                                 "SB31": ["Geerboogerd", "Willem", "TanthofBackup"],
@@ -37,15 +39,14 @@ class PriusData(Dataset):
                                 "DB": ["VermeerstraatD"]}
 
         if self.mode not in (self.avail_mixed_modes + self.avail_category_modes):
-            raise ValueError(
-                "Selected mode ({}) not available. Available modes: {}"
-                .format(self.mode, self.avail_mixed_modes + self.avail_category_modes))
+            raise ValueError("Selected mode ({}) not available. Available modes: {}"
+                             .format(self.mode, self.avail_mixed_modes + self.avail_category_modes))
 
         if len(self.header_names) != len(self.use_columns):
             raise ValueError("Number of columns({}) do not match the headers wanted({})".format(len(self.header_names),
                                                                                                 len(self.use_columns)))
 
-        self.csv_file = pd.read_csv(os.path.join(root_dir, "label_log.csv"), usecols=self.use_columns, header=None,
+        self.csv_file = pd.read_csv(os.path.join(root_dir, "label_log_crnn.csv"), usecols=self.use_columns, header=None,
                                     names=self.header_names)
 
         # slice data as per the mode selected
@@ -77,6 +78,7 @@ class PriusData(Dataset):
         return self.rel_data.shape[0]
 
     def __getitem__(self, idx):
+
         filename = self.rel_data["filename"].iloc[idx]
         sample_type = self.rel_data["fine_class"].iloc[idx]
 
@@ -84,7 +86,7 @@ class PriusData(Dataset):
 
         s_rate, data = wavfile.read(file_location)
 
-        if data.shape[0] == 1*s_rate:    # temporary fix - some samples are corrupted in engineOn-1-2-0.5
+        if data.shape[0] == SAMPLE_LENGTH * s_rate:  # temporary fix - some samples are corrupted in engineOn-1-2-0.5
             if self.transform is not None:
                 data = self.transform(data)
             else:
@@ -137,9 +139,31 @@ class PriusData(Dataset):
 
 class JoinDataset(PriusData):
 
-    def __init__(self, root_dir, dataset_1, dataset_2):
-        super().__init__(root_dir)
+    def __init__(self, dataset_1, dataset_2):
+        super().__init__(dataset_1.data_dir)
 
         self.rel_data = pd.concat([dataset_1.rel_data, dataset_2.rel_data])
         self.targets = pd.concat([dataset_1.targets, dataset_2.targets])
         self.transform = dataset_1.transform
+
+
+class BagSplitData(PriusData):
+
+    def __init__(self, dataset, test_split=0.2, mode="train", seed=42):
+        super().__init__(dataset.data_dir)
+
+        unique_bags = dataset.rel_data.drop_duplicates(subset=["bag_name"])[["bag_name", "location"]]
+
+        train_bags, test_bags = train_test_split(list(unique_bags["bag_name"]), test_size=test_split, shuffle=True,
+                                                 stratify=list(unique_bags["location"]), random_state=seed)
+
+        if mode == "train":
+            self.rel_data = dataset.rel_data[dataset.rel_data["bag_name"].isin(train_bags)]
+        elif mode == "test":
+            self.rel_data = dataset.rel_data[dataset.rel_data["bag_name"].isin(test_bags)]
+        else:
+            raise ValueError("Selected mode ({}) not available. Choose from: {}".format(mode, ["train", "test"]))
+
+        self.targets = self.rel_data[dataset.class_type]
+        self.transform = dataset.transform
+

@@ -35,7 +35,6 @@ class CRNN(Module):
         # initialize output tensor
         outputs = zeros(b_size, self.out_classes, t_size).to(cnn_output.device)
 
-        # for each time step, apply GRU (as per the reference paper) and the FNN
         for i, t_step in enumerate(cnn_output.permute(2, 1, 0)):
             h = self.rnn(t_step.T, h)
             outputs[:, :, i] = self.classifier(h)
