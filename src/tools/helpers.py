@@ -13,7 +13,7 @@ from torch.utils.data._utils.collate import default_collate
 
 from .metrics import f1_per_frame, weak_label_metrics
 from .settings import MODEL_PATH, MODEL_NAME, test_model_name, ENABLE_CLASS_COUNTING, DATA_DIR, CLASS_TYPE, \
-    BATCH_SIZE, RANDOM_SEED, REF_LABELS
+    BATCH_SIZE, RANDOM_SEED, REF_LABELS, CLASS_MODE
 from .dataset_spec import PriusData, JoinDataset, BagSplitData
 
 from tqdm import tqdm
@@ -59,8 +59,10 @@ def category_split(train_cat=None,
                    num_workers=1,
                    seed=None,
                    transform=None,
-                   verbose=True):
-    train_dataset = PriusData(DATA_DIR, transform=transform, mode=train_cat, class_type=CLASS_TYPE)
+                   verbose=True,
+                   drop_front=False):
+    train_dataset = PriusData(DATA_DIR, transform=transform, mode=train_cat,
+                              class_type=CLASS_TYPE, drop_front=drop_front)
 
     if test_cat is None:
         train_loader, val_loader, test_loader = stratified_split(train_dataset, mode="three_split",
@@ -72,7 +74,8 @@ def category_split(train_cat=None,
                                                                   mode="two_split_cat", batch_size=batch_size,
                                                                   seed=seed, verbose=False)
 
-        test_dataset = PriusData(DATA_DIR, transform=transform, mode=test_cat, class_type=CLASS_TYPE)
+        test_dataset = PriusData(DATA_DIR, transform=transform, mode=test_cat,
+                                 class_type=CLASS_TYPE, drop_front=drop_front)
         test_loader = DataLoader(test_dataset, batch_size=batch_size, num_workers=num_workers, collate_fn=my_collate)
 
         test_dist = get_samples_per_class(np.arange(len(test_dataset)), test_dataset, ENABLE_CLASS_COUNTING)
@@ -99,11 +102,14 @@ def category_split(train_cat=None,
 
 
 def join_dataset(data_cat,
-                 transform=None):
-    dataset = PriusData(DATA_DIR, transform=transform, mode=data_cat[0], class_type=CLASS_TYPE)
+                 transform=None,
+                 drop_front=False):
+    dataset = PriusData(DATA_DIR, transform=transform, mode=data_cat[0],
+                        class_type=CLASS_TYPE, drop_front=drop_front)
 
     for num_set in range(1, len(data_cat)):
-        temp_dataset = PriusData(DATA_DIR, transform=transform, mode=data_cat[num_set], class_type=CLASS_TYPE)
+        temp_dataset = PriusData(DATA_DIR, transform=transform, mode=data_cat[num_set],
+                                 class_type=CLASS_TYPE, drop_front=drop_front)
         dataset = JoinDataset(dataset, temp_dataset)
 
     return dataset
@@ -116,16 +122,19 @@ def combo_split(train_cat=None,
                 num_workers=1,
                 seed=None,
                 transform=None,
-                verbose=True):
+                verbose=True,
+                drop_front=False):
     if type(train_cat) is tuple:
-        train_dataset = join_dataset(train_cat, transform=transform)
+        train_dataset = join_dataset(train_cat, transform=transform, drop_front=drop_front)
     elif type(train_cat) is not tuple:
-        train_dataset = PriusData(DATA_DIR, transform=transform, mode=train_cat, class_type=CLASS_TYPE)
+        train_dataset = PriusData(DATA_DIR, transform=transform, mode=train_cat,
+                                  class_type=CLASS_TYPE, drop_front=drop_front)
 
     if type(test_cat) is tuple:
-        test_dataset = join_dataset(test_cat, transform=transform)
+        test_dataset = join_dataset(test_cat, transform=transform, drop_front=drop_front)
     elif type(test_cat) is not tuple:
-        test_dataset = PriusData(DATA_DIR, transform=transform, mode=test_cat, class_type=CLASS_TYPE)
+        test_dataset = PriusData(DATA_DIR, transform=transform, mode=test_cat,
+                                 class_type=CLASS_TYPE, drop_front=drop_front)
 
     train_loader, val_loader = stratified_split(train_dataset,
                                                 mode="two_split",
@@ -143,16 +152,18 @@ def bag_split(data_cat=None,
               seed=42,
               transform=None,
               num_workers=1,
-              verbose=True):
+              verbose=True,
+              drop_front=False):
 
     if data_cat is None:
         data_cat = "static"
         raise Warning("Using static set as train set")
 
-    dataset = PriusData(DATA_DIR, transform=transform, mode=data_cat, class_type=CLASS_TYPE)
+    dataset = PriusData(DATA_DIR, transform=transform, mode=data_cat,
+                        class_type=CLASS_TYPE, drop_front=drop_front)
 
-    train_split = BagSplitData(dataset, mode="train", seed=seed)
-    test_split = BagSplitData(dataset, mode="test", seed=seed)
+    train_split = BagSplitData(dataset, mode="train", seed=seed, drop_front=drop_front)
+    test_split = BagSplitData(dataset, mode="test", seed=seed, drop_front=drop_front)
 
     train_loader, val_loader = stratified_split(train_split,
                                                 mode="two_split",
@@ -402,7 +413,7 @@ def run_one_epoch(model=None,
             writer.add_scalar('Loss/{}'.format(mode), all_losses.mean().item(), epoch_num)
         return model, all_losses
     elif mode == "test":
-        conf_mat, accuracy = weak_label_metrics(y_hat.sigmoid(), y_true, verbose)
+        conf_mat, accuracy = weak_label_metrics(y_hat.sigmoid(), y_true, verbose=verbose, mode=CLASS_MODE)
         return model, f1_score, conf_mat, accuracy
 
 

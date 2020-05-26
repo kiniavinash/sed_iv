@@ -10,30 +10,42 @@ from sklearn.metrics import confusion_matrix, accuracy_score, jaccard_score
 _eps: float = torch.finfo(torch.float32).eps
 
 
-def get_weak_labels(y_hat):
+def get_weak_labels(y_hat, mode="multi_class"):
     """
     Aggregates strong labels to weak labels per frame
 
     :param y_hat: strong labels
     :return: y_hat_weak: weak labels
     """
-    # compute idx of max probability for each time step
-    _, max_idxs = y_hat.max(dim=1)
+    if mode == "multi_class":
+        # compute idx of max probability for each time step
+        _, max_idxs = y_hat.max(dim=1)
 
-    # generate mask
-    y_preds = torch.zeros(y_hat.shape)
-    y_preds = y_preds.scatter_(1, max_idxs.unsqueeze(1), 1.)
+        # generate mask
+        y_preds = torch.zeros(y_hat.shape)
+        y_preds = y_preds.scatter_(1, max_idxs.unsqueeze(1), 1.)
 
-    # majority voting
-    sum_votes = y_preds.sum(dim=2)
+        # majority voting
+        sum_votes = y_preds.sum(dim=2)
 
-    ref_labels = REF_LABELS
+        ref_labels = REF_LABELS
 
-    # generate weak labels
-    _, preds = sum_votes.max(dim=1)
-    y_hat_weak = [ref_labels[idx] for idx in preds]
+        # generate weak labels
+        _, preds = sum_votes.max(dim=1)
+        y_hat_weak = [ref_labels[idx] for idx in preds]
 
-    return y_hat_weak
+        return y_hat_weak
+
+    elif mode == "single_class":
+        # threshold to determine positive or not
+        y_hat = y_hat.ge(0.5).float()
+
+        # convert to weak labels by majority voting
+        votes = y_hat.sum(dim=2) >= y_hat.shape[2] / 2
+
+        y_hat_weak = [REF_LABELS[0] if vote else REF_LABELS[1] for vote in votes]
+
+        return y_hat_weak
 
 
 def get_per_class_acc(C):
@@ -74,9 +86,9 @@ def get_per_class_iou(C):
     return pc_accuracies
 
 
-def weak_label_metrics(y_hat, y_true, verbose=True):
-    y_hat_weak = get_weak_labels(y_hat)
-    y_true_weak = get_weak_labels(y_true)
+def weak_label_metrics(y_hat, y_true, verbose=True, mode="multi_class"):
+    y_hat_weak = get_weak_labels(y_hat, mode=mode)
+    y_true_weak = get_weak_labels(y_true, mode=mode)
 
     # compute confusion matrix
     conf_mat_uf = confusion_matrix(y_true_weak, y_hat_weak, labels=REF_LABELS)

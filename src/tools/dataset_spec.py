@@ -10,16 +10,23 @@ from torchvision import transforms
 from torch.utils.data.dataset import Dataset
 from sklearn.model_selection import train_test_split
 
-from .settings import SAMPLE_LENGTH
+from .settings import SAMPLE_LENGTH, CLASS_MODE
+
 
 class PriusData(Dataset):
 
-    def __init__(self, root_dir, transform=None, mode="static", class_type="coarse_class", label_type="strong_label"):
+    def __init__(self, root_dir,
+                 transform=None,
+                 mode="static",
+                 class_type="coarse_class",
+                 label_type="strong_label",
+                 drop_front=False):
         self.data_dir = root_dir
         self.mode = mode
         self.class_type = class_type
         self.label_type = label_type
         self.transform = transform
+        self.drop_front = drop_front
 
         # make it easier to read the csv file
         self.header_names = ["bag_name", "fine_class", "filename", "coarse_class", "location", "frame_num",
@@ -48,6 +55,9 @@ class PriusData(Dataset):
 
         self.csv_file = pd.read_csv(os.path.join(root_dir, "label_log_crnn.csv"), usecols=self.use_columns, header=None,
                                     names=self.header_names)
+
+        if drop_front:
+            self.csv_file = self.csv_file.drop(self.csv_file[self.csv_file["fine_class"] == "front"].index)
 
         # slice data as per the mode selected
         if self.mode == "static" or self.mode == "driving":
@@ -96,7 +106,7 @@ class PriusData(Dataset):
             weak_label = label
 
             if self.label_type == "strong_label":
-                label = self.get_strong_labels(weak_label, data.shape[1])
+                label = self.get_strong_labels(weak_label, data.shape[1], mode=CLASS_MODE)
             elif self.label_type not in self.avail_label_t:
                 raise ValueError("Selected label type ({}) not available. Choose from: {}"
                                  .format(self.label_type, self.avail_label_t))
@@ -105,10 +115,11 @@ class PriusData(Dataset):
         else:
             return None
 
-    def get_strong_labels(self, label, t_size):
+    def get_strong_labels(self, label, t_size, mode="multi_class"):
         """
         convert weak labels to strong.
 
+        :param mode:
         :param t_size: temporal length of each spectrogram
         :param label: weak labels in the form of str
         :return: strong labels
@@ -116,25 +127,38 @@ class PriusData(Dataset):
         label_tensor = torch.ones([1, t_size], dtype=torch.float64)
         strong_label = None
 
-        if self.class_type == "coarse_class":
-            strong_label = torch.zeros([2, t_size], dtype=torch.float64)
-            if label == "positive":
-                strong_label[0, :] = strong_label[0, :] + label_tensor
-            else:
-                strong_label[1, :] = strong_label[1, :] + label_tensor
+        if mode == "multi_class":
+            if self.class_type == "coarse_class":
+                strong_label = torch.zeros([2, t_size], dtype=torch.float64)
+                if label == "positive":
+                    strong_label[0, :] = strong_label[0, :] + label_tensor
+                else:
+                    strong_label[1, :] = strong_label[1, :] + label_tensor
 
-        elif self.class_type == "fine_class":
-            strong_label = torch.zeros([4, t_size], dtype=torch.float64)
-            if label == "front":
-                strong_label[0, :] = strong_label[0, :] + label_tensor
-            elif label == "left":
-                strong_label[1, :] = strong_label[1, :] + label_tensor
-            elif label == "negative":
-                strong_label[2, :] = strong_label[2, :] + label_tensor
-            elif label == "right":
-                strong_label[3, :] = strong_label[3, :] + label_tensor
+            elif self.class_type == "fine_class":
+                strong_label = torch.zeros([4, t_size], dtype=torch.float64)
+                if label == "front":
+                    strong_label[0, :] = strong_label[0, :] + label_tensor
+                elif label == "left":
+                    strong_label[1, :] = strong_label[1, :] + label_tensor
+                elif label == "negative":
+                    strong_label[2, :] = strong_label[2, :] + label_tensor
+                elif label == "right":
+                    strong_label[3, :] = strong_label[3, :] + label_tensor
 
-        return strong_label
+            return strong_label
+        elif mode == "single_class":
+            if self.class_type == "fine_class":
+                raise ValueError ("Cannot have mode: {} and class division: {} together".format(mode, self.class_type))
+            elif self.class_type == "coarse_class":
+                strong_label = torch.zeros([1, t_size], dtype=torch.float64)
+                if label == "positive":
+                    strong_label = label_tensor
+
+            return strong_label
+
+        else:
+            raise ValueError("Mode: {}, unknown. Choose from : {}".format(mode, ["multi_class", "single_class"]))
 
 
 class JoinDataset(PriusData):
@@ -149,8 +173,11 @@ class JoinDataset(PriusData):
 
 class BagSplitData(PriusData):
 
-    def __init__(self, dataset, test_split=0.2, mode="train", seed=42):
-        super().__init__(dataset.data_dir)
+    def __init__(self, dataset, test_split=0.2, mode="train", seed=42, drop_front=False):
+        super().__init__(dataset.data_dir, drop_front=drop_front)
+
+        # True if random samples needs to be dropped from positive class for fair comparison when drop_front=False
+        equalize_train = False
 
         unique_bags = dataset.rel_data.drop_duplicates(subset=["bag_name"])[["bag_name", "location"]]
 
@@ -159,11 +186,26 @@ class BagSplitData(PriusData):
 
         if mode == "train":
             self.rel_data = dataset.rel_data[dataset.rel_data["bag_name"].isin(train_bags)]
+            if drop_front:
+                self.rel_data = self.rel_data.drop(self.rel_data[self.rel_data["fine_class"] == "front"].index)
+            else:
+                if equalize_train:
+                    num_front = len(self.rel_data[self.rel_data["fine_class"] == "front"])
+                    temp_df = self.rel_data[self.rel_data["fine_class"].isin(["front", "left", "right"])]
+                    temp_df_idxs = temp_df.index
+                    to_remove = np.random.choice(temp_df_idxs, size=num_front, replace=False)
+                    temp_df = temp_df.drop(to_remove)
+                    self.rel_data = self.rel_data.drop(temp_df_idxs)
+                    self.rel_data = pd.concat([self.rel_data, temp_df])
+
         elif mode == "test":
             self.rel_data = dataset.rel_data[dataset.rel_data["bag_name"].isin(test_bags)]
+            if drop_front:
+                self.rel_data = self.rel_data.drop(self.rel_data[self.rel_data["fine_class"] == "front"].index)
         else:
             raise ValueError("Selected mode ({}) not available. Choose from: {}".format(mode, ["train", "test"]))
 
         self.targets = self.rel_data[dataset.class_type]
         self.transform = dataset.transform
 
+        print(list(set(self.rel_data["fine_class"])))

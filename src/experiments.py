@@ -118,7 +118,7 @@ def only_static_mixed_loc(parsed):
     return test_f1_score, test_conf_mat, test_accuracy
 
 
-def custom_train_test_split(parsed, train_set="static", test_set=None, seed=None):
+def custom_train_test_split(parsed, train_set="static", test_set=None, seed=None, drop_front=False):
     print("========================================================")
     print("Train Set: {}, Test set: {}".format(train_set, test_set))
 
@@ -135,7 +135,8 @@ def custom_train_test_split(parsed, train_set="static", test_set=None, seed=None
 
         train_data, val_data, test_data = category_split(train_cat=train_set, test_cat=test_set,
                                                          batch_size=BATCH_SIZE, seed=seed,
-                                                         transform=my_transforms, verbose=False)
+                                                         transform=my_transforms, verbose=False,
+                                                         drop_front=drop_front)
         test_f1_score, test_conf_mat, test_accuracy = run_train_test(parsed,
                                                                      train_data=train_data,
                                                                      test_data=test_data,
@@ -156,7 +157,8 @@ def custom_train_test_split(parsed, train_set="static", test_set=None, seed=None
 
         train_data, val_data, test_data = combo_split(train_cat=train_set, test_cat=test_set,
                                                       batch_size=BATCH_SIZE, seed=seed,
-                                                      transform=my_transforms, verbose=False)
+                                                      transform=my_transforms, verbose=False,
+                                                      drop_front=drop_front)
 
         test_f1_score, test_conf_mat, test_accuracy = run_train_test(parsed,
                                                                      train_data=train_data,
@@ -169,7 +171,7 @@ def custom_train_test_split(parsed, train_set="static", test_set=None, seed=None
     return test_f1_score, test_conf_mat, test_accuracy
 
 
-def window_length_exp(parsed, data_set="static", seed=None):
+def window_length_exp(parsed, data_set="static", seed=None, drop_front=False):
     # change DATA_DIR in the settings file as required
     print("========================================================")
     print("Data Set: {}".format(data_set))
@@ -184,7 +186,8 @@ def window_length_exp(parsed, data_set="static", seed=None):
                                                 batch_size=BATCH_SIZE,
                                                 seed=seed,
                                                 transform=my_transforms,
-                                                verbose=False)
+                                                verbose=False,
+                                                drop_front=drop_front)
 
     test_f1_score, test_conf_mat, test_accuracy = run_train_test(parsed,
                                                                  train_data=train_data,

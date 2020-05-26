@@ -4,10 +4,12 @@ import os
 from datetime import datetime
 
 # hyperparameters
-SAMPLE_LENGTH = 1  # stupid work around to avoid errors due to corrupted samples
+SAMPLE_LENGTH = 1.5  # stupid work around to avoid errors due to corrupted samples
 DATA_DIR = "/media/micarray/Seagate_8TB/results/BCC_combined/labeled_data/engineOnData-" + str(SAMPLE_LENGTH) + "-0-0/data"
 RUN_START = datetime.now().strftime("%b%d_%H-%M-%S")
 MODEL_PATH = "saved_models/" + RUN_START + "/"
+
+print("Starting run now: {}".format(RUN_START))
 
 SAMPLE_RATE = 47998
 MEL_BANKS = 128
@@ -45,9 +47,11 @@ test_model_name = CLASS_TYPE + "_epochs_" + str(EPOCHS) + \
 if CLASS_TYPE == "fine_class":
     REF_LABELS = ["front", "left", "negative", "right"]
     OUT_CLASSES = 4
+    CLASS_MODE = "multi_class"
 elif CLASS_TYPE == "coarse_class":
     REF_LABELS = ["positive", "negative"]
-    OUT_CLASSES = 2
+    OUT_CLASSES = 1
+    CLASS_MODE = "single_class"
 else:
     raise ValueError("Error in class type selection!")
 
