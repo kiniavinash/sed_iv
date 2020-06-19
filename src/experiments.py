@@ -30,7 +30,9 @@ def get_transform():
         lambda x: librosa.feature.melspectrogram(y=x, sr=SAMPLE_RATE, n_mels=MEL_BANKS, fmax=SAMPLE_RATE // 2,
                                                  n_fft=N_FFT, hop_length=int(N_FFT*OVERLAP), window=WINDOW),
         # lambda x: librosa.power_to_db(x, ref=np.max),
-        lambda x: Tensor(x)
+        lambda x: Tensor(x),
+        lambda x: torch.log(x),
+        # lambda x: x.reshape([1, x.shape[0], x.shape[1]])
     ])
 
     return my_transforms
@@ -135,7 +137,7 @@ def custom_train_test_split(parsed, train_set="static", test_set=None, seed=None
 
         train_data, val_data, test_data = category_split(train_cat=train_set, test_cat=test_set,
                                                          batch_size=BATCH_SIZE, seed=seed,
-                                                         transform=my_transforms, verbose=False,
+                                                         transform=my_transforms, verbose=False, num_workers=16,
                                                          drop_front=drop_front)
         test_f1_score, test_conf_mat, test_accuracy = run_train_test(parsed,
                                                                      train_data=train_data,

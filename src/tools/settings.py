@@ -15,7 +15,7 @@ SAMPLE_RATE = 47998
 MEL_BANKS = 128
 MIC_USED = 5  # mic number used
 N_FFT = 2048
-OVERLAP = 0.5
+OVERLAP = 0.275
 WINDOW = 'hamming'
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
